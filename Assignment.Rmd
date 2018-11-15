@@ -1,0 +1,123 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Peter Willmott"
+date: "November 12, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+This project aims to use data from accelerometers, placed on the arm, forearm, belt, and dumbell, to quantify and predict 'how well' a particular activity is performed. In this case 10 repetitions of the Unilateral Dumbell Biceps Curl. 6 male participants (20 - 28 years) lifted a dumbell (1.25kg) in 5 different fashions:
+
+* **Class A:** Exactly according to specification
+* **Class B:** Throwing the elbows to the front
+* **Class C:** Lifting the dumbell only halfway
+* **Class D:** Lowering the dumbell only halfway
+* **Class E:** Throwing the hips to the front
+
+The data set is credited to Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Excercises.
+
+The final model was able to predict the manner in which they did excercise to an accuracy of 99.3% (Based on a Validation Data set) and an out of bag (OOB) error of 0.72%. The best model was Random Forest (RF), which produced greater accuracy than both Gradient Boosting Machine (GBM) and Linear discriminant analysis (LDA). Cross validation was used to estimate models accuracy.
+
+## The Data
+The data was 2 csv files (pml-training.csv and pml-testing.csv), each consisting of 160 variables. The pml-training data contained 19622 observations and the pml-testing contained 20.
+
+Loading required libraries, reading in the data and setting the seed.
+```{r data, message=FALSE, warning=FALSE}
+library(caret)
+library(ggplot2)
+library(gbm)
+
+set.seed(3141)
+pml_training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+## Exploratory Analysis
+Brief look at the size, missing values and near zero variance (NZV) of the data.
+```{r explore}
+dim(testing)
+dim(pml_training)
+sum(is.na(pml_training))
+sum(is.na(testing))
+sum(nearZeroVar(pml_training))
+sum(nearZeroVar(testing))
+```
+Looking at the data there are alot of observations in the pml_training data set, enough to allow for the creation ofa validation test set. However the data has a significant amount of NA values as well as near zero variance variables, these will have to be removed. Several columns are inconsequential to the model and will be removed (e.g. user_name).
+
+## Cleaning Data
+```{r clean}
+pml_training1 <- pml_training[-c(1:7)] # Remove insignificant columns
+nearZV <- nearZeroVar(pml_training1) # Index of NZV columns
+pml_training2 <- pml_training1[, -nearZV] # Remove NZV columns
+pml_training3 <- pml_training2[, colMeans(is.na(pml_training2)) <= .5] # Remove column if more than 50% is NA
+
+cTransform <- colnames(pml_training3[, -53]) # classe removed
+testingF <- testing[cTransform] # cleaned testing set
+```
+## Validation Data Set
+creating a separate validation set from the cleaned pml_training data that can be used to perform cross validation and get the expected out of sample error.
+```{r validation}
+
+inTrain <- createDataPartition(y = pml_training3$classe, p = 0.7, list = FALSE)
+training <- pml_training3[inTrain,]
+validation <- pml_training3[-inTrain,]
+
+```
+## Training Models
+A Random Forest, Gradient Boosting Machine and Linear Discriminant Analysis algorithm were performed separately on the training data set. Each method was trained using a k-fold cross validation of 5 subsets, this was done using the trControl variable introduced in the caret package. The models were then used to predict on the validation data set.
+
+#### Random Forest
+This method was chosen because of its very succesful use in countless research papers, and is well suited to this data set because of the non-bionomial outcome and large sample size. Random forest is an example of a bagging algorithm
+
+#### Gradient Boosting Machine (GBM)
+This model was chosen because it is one of the most powerful techniques for building predictive models. GBM does have a tendancy to overfit but does reduce bias and variance. GBM was also used as it is an example of a boosting algorithm, contrast to Random Forest.
+
+#### Linear Discriminant Analysis (LDA)
+This model was chosen because there are more than 2 classes in this classification problem. It is a linear classification technique, it is a simple model in both preparation and application and the linear approach is different to the above algorithms.
+
+```{r train, cache=TRUE, results='hide'}
+
+train.control <- trainControl(method = "cv", number = 5) # Setting the cross validation parameters
+
+rf_model <- train(classe ~., method = "rf", data = training, trControl = train.control) # Training the random forest model fit
+gbm_model <- train(classe ~., method = "gbm", data = training, trControl = train.control) # Training the Gradient Boosting Machine 
+lda_model <- train(classe ~., method = "lda", data = training, trControl = train.control) # Training the Linear Discriminant Analysis
+
+# Predicting on the Validation data set
+rf_pred <- predict(rf_model, validation) 
+gbm_pred <- predict(gbm_model, validation)
+lda_pred <- predict(lda_model, validation)
+```
+## Results
+Random Forest performed the best out of the 3 chosen algorithms
+
+Originally the models were combined into a stacked model but the model performed equal to the random forest model and likely introduced less over fitting.
+```{r result}
+# Accuracy
+confusionMatrix(rf_pred, validation$classe) # Random Forest
+confusionMatrix(gbm_pred, validation$classe)$overall[1:2] # Gradient Boosting Machine
+confusionMatrix(lda_pred, validation$classe)$overall[1:2] # Linear Discriminant Analysis
+
+results <- resamples(list(RF = rf_model, GBM = gbm_model, LDA = lda_model))
+summary(results)
+
+bwplot(results)
+
+rf_model$finalModel # OOB error for random forest 
+```
+
+Since Random Forest performed the best out of all the models it was used to predict the independant test set
+```{r testing}
+rf_predTest <- predict(rf_model, testingF)
+rf_predTest
+```
+
+
+
+
+
